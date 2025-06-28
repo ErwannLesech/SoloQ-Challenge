@@ -5,6 +5,6 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ['soloq-challenge-5nx0.onrender.com'],
+    allowedHosts: ['soloq-challenge-f44l.onrender.com'],
   },
 });
