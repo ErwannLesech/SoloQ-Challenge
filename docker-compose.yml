@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: soloq
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: soloq_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - RIOT_API_KEY=${RIOT_API_KEY}
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend:/app
+
+
+  frontend:
+    build: ./frontend
+    container_name: soloq_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    command: npm run dev
+volumes:
+  db_data:
