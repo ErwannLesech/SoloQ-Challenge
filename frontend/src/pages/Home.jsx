@@ -20,7 +20,7 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchMatches = () => {
-    fetch("http://localhost:4000/api/recent_matches")
+    fetch("https://lol-backend-0qvu.onrender.com/api/recent_matches")
       .then(res => res.json())
       .then(data => setRecentMatches(data))
       .catch(err => console.error("Erreur fetch matchs:", err));
@@ -62,7 +62,7 @@ export default function Home() {
   }
 
   const fetchPlayers = () => {
-    fetch("http://localhost:4000/api/players")
+    fetch("https://lol-backend-0qvu.onrender.com/api/players")
       .then(res => res.json())
       .then(data => {
         setPlayers(data)
@@ -145,7 +145,7 @@ export default function Home() {
     setIsSubmitting(true)
 
     try {
-      const res = await fetch("http://localhost:4000/api/player", {
+      const res = await fetch("https://lol-backend-0qvu.onrender.com/api/player", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData)
@@ -166,7 +166,7 @@ export default function Home() {
 
   const handleUpdatePlayer = () => {
     setIsUpdating(true)
-    fetch("http://localhost:4000/api/update_players")
+    fetch("https://lol-backend-0qvu.onrender.com/api/update_players")
       .then(res => res.json())
       .then(() => fetchPlayers())
       .then(() => fetchMatches()) 
