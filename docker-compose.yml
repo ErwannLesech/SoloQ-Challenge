@@ -24,14 +24,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - .env.development
     environment:
-      - RIOT_API_KEY=${RIOT_API_KEY}
-      - DB_HOST=${DB_HOST}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-      - DB_PORT=${DB_PORT}
-      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=development
     ports:
       - "4000:4000"
     volumes:
@@ -43,6 +39,8 @@ services:
     container_name: soloq_frontend
     ports:
       - "5173:5173"
+    env_file:
+      - ./frontend/.env.development
     volumes:
       - ./frontend:/app
     command: npm run dev

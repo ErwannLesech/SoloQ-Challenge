@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid'
 
 export default function Home() {
+  const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
+  
   const [players, setPlayers] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
@@ -18,13 +20,24 @@ export default function Home() {
   const navigate = useNavigate()
   const [recentMatches, setRecentMatches] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showFullMatchPanel, setShowFullMatchPanel] = useState(false);
+  const [fullMatchList, setFullMatchList] = useState([]);
+
 
   const fetchMatches = () => {
-    fetch("https://lol-backend-0qvu.onrender.com/api/recent_matches")
+    fetch(`${apiUrl}/api/recent_matches`)
       .then(res => res.json())
       .then(data => setRecentMatches(data))
       .catch(err => console.error("Erreur fetch matchs:", err));
   };
+
+  const fetchFullMatchList = () => {
+    fetch(`${apiUrl}/api/recent_matches_extended`) // adapte selon ton API
+      .then(res => res.json())
+      .then(data => setFullMatchList(data))
+      .catch(err => console.error("Erreur fetch 20 derniers matchs:", err));
+  };
+
 
   useEffect(() => {
     fetchMatches();
@@ -32,24 +45,24 @@ export default function Home() {
 
 
   const tierOrder = {
-    "IRON": 1,
-    "BRONZE": 2,
-    "SILVER": 3,
-    "GOLD": 4,
-    "PLATINUM": 5,
-    "EMERALD": 6,
-    "DIAMOND": 7,
-    "MASTER": 8,
-    "GRANDMASTER": 9,
-    "CHALLENGER": 10,
+    "IRON": 0,
+    "BRONZE": 400,
+    "SILVER": 800,
+    "GOLD": 1200,
+    "PLATINUM": 1600,
+    "EMERALD": 2000,
+    "DIAMOND": 2400,
+    "MASTER": 2800,
+    "GRANDMASTER": 3400,
+    "CHALLENGER": 3800,
     "UNRANKED": 0
   };
 
   const rankOrder = {
-    "IV": 1,
-    "III": 2,
-    "II": 3,
-    "I": 4,
+    "IV": 0,
+    "III": 100,
+    "II": 200,
+    "I": 300,
     "": 0
   };
 
@@ -57,12 +70,12 @@ export default function Home() {
   const calculateEloPoints = (player) => {
     const tierValue = tierOrder[player.tier?.toUpperCase()] || 0
     const rankValue = rankOrder[player.rank?.toUpperCase()] || 0
-    // Poids : tier * 10 + rank * 2
-    return tierValue * 10 + rankValue * 2
+    // Poids : tier + rank + LP
+    return tierValue + rankValue + (player.lp || 0);
   }
 
   const fetchPlayers = () => {
-    fetch("https://lol-backend-0qvu.onrender.com/api/players")
+    fetch(`${apiUrl}/api/players`)
       .then(res => res.json())
       .then(data => {
         setPlayers(data)
@@ -145,7 +158,7 @@ export default function Home() {
     setIsSubmitting(true)
 
     try {
-      const res = await fetch("https://lol-backend-0qvu.onrender.com/api/player", {
+      const res = await fetch(`${apiUrl}/api/player`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData)
@@ -166,7 +179,7 @@ export default function Home() {
 
   const handleUpdatePlayer = () => {
     setIsUpdating(true)
-    fetch("https://lol-backend-0qvu.onrender.com/api/update_players")
+    fetch(`${apiUrl}/api/update_players`)
       .then(res => res.json())
       .then(() => fetchPlayers())
       .then(() => fetchMatches()) 
@@ -259,12 +272,29 @@ export default function Home() {
 
             {/* Bloc derniers matchs joués */}
             <div
-              className="p-6 rounded-lg shadow-lg w-2/3"
+              onClick={() => {
+                setShowFullMatchPanel(true);
+                fetchFullMatchList();
+              }}
+              className="p-6 rounded-lg shadow-lg w-2/3 cursor-pointer relative group"
               style={{
                 boxShadow: '0 0 15px 5px rgba(150, 220, 255, 0.6)',
                 backgroundColor: darkMode ? '#1e293b' : '#f0f9ff'
               }}
             >
+              {/* Icône loupe en haut à droite */}
+              <div className="absolute top-3 right-3 text-gray-500 group-hover:text-blue-500 transition">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" />
+                </svg>
+              </div>
+
               <h2 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-300 text-center border-b border-blue-400 pb-2">
                 DERNIERS MATCHS DU CHALLENGE
               </h2>
@@ -529,6 +559,58 @@ export default function Home() {
         </footer>
 
       </div>
+
+      {/* Panel des 20 derniers matchs */}
+      {showFullMatchPanel && (
+        <div className="fixed inset-0 z-50 bg-black bg-opacity-60 backdrop-blur-sm flex justify-center items-center">
+          <div className="bg-white dark:bg-slate-800 rounded-lg p-6 w-[90vw] max-h-[80vh] overflow-y-auto relative shadow-2xl">
+            <button
+              className="absolute top-3 right-3 text-red-500 hover:text-red-700"
+              onClick={() => setShowFullMatchPanel(false)}
+            >
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <h2 className="text-2xl font-bold mb-4 text-center text-blue-600 dark:text-blue-300">20 Derniers Matchs</h2>
+
+            <table className="min-w-full text-sm text-gray-800 dark:text-gray-200">
+              <thead className="bg-blue-200 dark:bg-slate-700 text-gray-900 dark:text-gray-100">
+                <tr>
+                  <th className="p-3 text-left">Joueur</th>
+                  <th className="p-3 text-left">Équipe</th>
+                  <th className="p-3 text-left">Champion</th>
+                  <th className="p-3 text-left">Adversaire</th>
+                  <th className="p-3 text-center">KDA</th>
+                  <th className="p-3 text-center">Résultat</th>
+                  <th className="p-3 text-center">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fullMatchList.map((match, index) => (
+                  <tr key={index} className={`${index % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-blue-50 dark:bg-slate-700'}`}>
+                    <td className="p-3">{match.summoner_name}</td>
+                    <td className="p-3 capitalize">{match.team}</td>
+                    <td className="p-3">{match.champion_name}</td>
+                    <td className="p-3">{match.opponent_champion}</td>
+                    <td className="p-3 text-center font-semibold">
+                      {match.kills}/{match.deaths}/{match.assists}
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className={`px-2 py-1 rounded-full font-semibold text-white ${match.win ? 'bg-green-500' : 'bg-red-500'}`}>
+                        {match.win ? 'Win' : 'Loss'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-center">{new Date(match.game_datetime).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+
     </div>
   )
 }

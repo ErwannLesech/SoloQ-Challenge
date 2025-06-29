@@ -283,6 +283,20 @@ app.get('/api/recent_matches', async (req, res) => {
   }
 });
 
+app.get('/api/recent_matches_extended', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM recent_matches 
+      ORDER BY game_datetime DESC 
+      LIMIT 20
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Erreur lors de la récupération des matchs récents.' });
+  }
+});
 
 const PORT = 4000;
 app.listen(PORT, () => {

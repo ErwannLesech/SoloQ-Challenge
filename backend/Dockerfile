@@ -7,4 +7,6 @@ RUN npm install
 
 COPY . .
 
+ENV NODE_ENV=development
+
 CMD ["node", "index.js"]
