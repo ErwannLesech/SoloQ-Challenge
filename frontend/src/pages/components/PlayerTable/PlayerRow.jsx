@@ -1,6 +1,7 @@
 import RankIcon from "../RankIcon/RankIcon"
+import PlayerStatus from './PlayerStatus';
 
-export default function PlayerRow({ player, index, getTeamColor }) {
+export default function PlayerRow({ player, index, getTeamColor, isInGame, lastOnline }) {
   return (
     <tr
       className={`${getTeamColor(player.team)} hover:opacity-90 cursor-pointer transition`}
@@ -15,6 +16,12 @@ export default function PlayerRow({ player, index, getTeamColor }) {
         <span className={`inline-block px-3 py-1 rounded-full font-medium ${getTeamColor(player.team)}`}>
           {player.team.charAt(0).toUpperCase() + player.team.slice(1)}
         </span>
+      </td>
+      <td className="p-4 text-center">
+        <PlayerStatus 
+          isInGame={isInGame} 
+          lastOnline={lastOnline} 
+        />
       </td>
       <td className="p-4 text-center flex items-center justify-center space-x-1">
         <RankIcon tier={player.tier} />

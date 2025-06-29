@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
+import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom'
 import DarkModeToggle from './components/DarkModeToggle/DarkModeToggle'
 import Header from './components/Header/Header'
@@ -218,14 +219,14 @@ export default function Home() {
   return (
     <div className={`${darkMode ? 'dark' : ''}`}>
       <div className={`w-screen min-h-screen ${darkMode ? 'bg-gray-900 text-blue-300' : 'bg-slate-200 text-slate-800'} transition-colors duration-500`}>
-        <div className="w-full px-8 py-10 relative">
+        <div className="w-full px-4 md:px-8 py-6 md:py-10 relative">
           
           <Header 
             darkMode={darkMode} 
             setDarkMode={setDarkMode} 
           />
-          <div className="flex flex-col items-center mb-8">
-            <div className="flex justify-center gap-6">
+          <div className="flex flex-col items-center mb-6 md:mb-8">
+            <div className="flex flex-col sm:flex-row justify-center gap-4 sm:gap-6 w-full">
               <UpdateButton 
                 handleUpdatePlayer={handleUpdatePlayer}
                 isUpdating={isUpdating}
@@ -234,20 +235,26 @@ export default function Home() {
 
               <button
                 onClick={() => setShowForm(prev => !prev)}
-                className="bg-blue-600 text-white px-5 py-3 rounded-lg hover:bg-blue-700 shadow-md transition"
+                className="bg-blue-600 text-white px-4 py-2 sm:px-5 sm:py-3 rounded-lg hover:bg-blue-700 shadow-md transition"
               >
                 {showForm ? 'Cancel' : 'Add player to Challenge'}
               </button>
+
+              <Link 
+                to="/live-games" 
+                className="bg-purple-600 text-white px-4 py-2 sm:px-5 sm:py-3 rounded-lg hover:bg-purple-700 shadow-md transition text-center"
+              >
+                View Live Games
+              </Link>
             </div>
 
             {lastUpdate && (
-              <div className="text-sm text-gray-600 dark:text-gray-400 mt-4">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mt-2 md:mt-4">
                 Last updated: {lastUpdate.toLocaleString()}
               </div>
             )}
           </div>
-
-          <div className="flex justify-center gap-6 w-[80vw] max-w-full mx-auto mb-6">
+          <div className="flex flex-col lg:flex-row justify-center items-center gap-4 md:gap-6 w-[80vw] max-w-[80vw] mx-auto px-4 mb-6">
             <TeamRanking 
               teamRanking={teamRanking} 
               darkMode={darkMode} 
@@ -286,6 +293,7 @@ export default function Home() {
         <Footer darkMode={darkMode} />
       </div>
 
+      {/* Les modales restent inchangées */}
       {showTeamModal && (
         <TeamDetailsModal 
           showTeamModal={showTeamModal}
@@ -305,7 +313,6 @@ export default function Home() {
           fullMatchList={fullMatchList}
         />
       )}
-
     </div>
   )
 }

@@ -5,10 +5,12 @@ export default function RecentMatches({ recentMatches, darkMode, setShowFullMatc
         setShowFullMatchPanel(true);
         fetchFullMatchList();
       }}
-      className="p-6 rounded-lg shadow-lg w-2/3 cursor-pointer relative group"
+      className="p-6 rounded-lg shadow-lg cursor-pointer w-full relative group"
       style={{
         boxShadow: '0 0 15px 5px rgba(150, 220, 255, 0.6)',
-        backgroundColor: darkMode ? '#1e293b' : '#f0f9ff'
+        backgroundColor: darkMode ? '#1e293b' : '#f0f9ff',
+        minWidth: '280px',
+        maxWidth: '100%'
       }}
     >
       <div className="absolute top-3 right-3 text-gray-500 group-hover:text-blue-500 transition">

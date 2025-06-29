@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import PlayerRow from './PlayerRow';
 import PlayerSearch from './PlayerSearch';
 
@@ -14,6 +14,29 @@ export default function PlayerTable({
     key: null,
     direction: 'ascending',
   });
+  const [teamFilter, setTeamFilter] = useState('all');
+
+  const tierOrder = {
+    "IRON": 0,
+    "BRONZE": 400,
+    "SILVER": 800,
+    "GOLD": 1200,
+    "PLATINUM": 1600,
+    "EMERALD": 2000,
+    "DIAMOND": 2400,
+    "MASTER": 2800,
+    "GRANDMASTER": 3400,
+    "CHALLENGER": 3800,
+    "UNRANKED": 0
+  };
+
+  const rankOrder = {
+    "IV": 0,
+    "III": 100,
+    "II": 200,
+    "I": 300,
+    "": 0
+  };
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -23,13 +46,24 @@ export default function PlayerTable({
     setSortConfig({ key, direction });
   };
 
-  const sortedPlayers = [...initialFilteredPlayers].sort((a, b) => {
+  const filteredPlayers = useMemo(() => {
+    let result = [...initialFilteredPlayers];
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      result = result.filter(player => player.team === teamFilter);
+    }
+    
+    return result;
+  }, [initialFilteredPlayers, teamFilter]);
+
+  const sortedPlayers = [...filteredPlayers].sort((a, b) => {
     if (!sortConfig.key) return 0;
 
     // Special handling for different data types
     if (sortConfig.key === 'elo') {
-      const aValue = parseInt(a.lp || 0) + (a.tier ? 1000 : 0); // Simplified example
-      const bValue = parseInt(b.lp || 0) + (b.tier ? 1000 : 0);
+      const aValue = (tierOrder[a.tier?.toUpperCase()] || 0) + (rankOrder[a.rank?.toUpperCase()] || 0) + (a.lp || 0);
+      const bValue = (tierOrder[b.tier?.toUpperCase()] || 0) + (rankOrder[b.rank?.toUpperCase()] || 0) + (b.lp || 0);
       return sortConfig.direction === 'ascending' ? aValue - bValue : bValue - aValue;
     } else if (sortConfig.key === 'winrate') {
       const aValue = parseFloat(a.winrate || 0);
@@ -76,7 +110,8 @@ export default function PlayerTable({
       <PlayerSearch 
         searchTerm={searchTerm} 
         setSearchTerm={setSearchTerm} 
-        darkMode={darkMode} 
+        darkMode={darkMode}
+        setTeamFilter={setTeamFilter}
       />
       
       {searchTerm && (
@@ -93,6 +128,7 @@ export default function PlayerTable({
             <th className="p-4 text-left font-semibold">Player Name</th>
             <th className="p-4 text-left font-semibold">Summoner Name</th>
             <th className="p-4 text-left font-semibold">Team</th>
+            <th className="p-4 text-center font-semibold">Status</th>
             <th 
               className="p-4 text-center font-semibold cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600 transition"
               onClick={() => requestSort('elo')}
@@ -150,6 +186,8 @@ export default function PlayerTable({
               player={player} 
               index={index}
               getTeamColor={getTeamColor}
+              isInGame={player.in_game}
+              lastOnline={player.last_online}
             />
           ))}
         </tbody>
