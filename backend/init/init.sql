@@ -1,10 +1,9 @@
 -- Drop tables in correct order to respect foreign key constraints
-DROP TABLE IF EXISTS game_participants;
-DROP TABLE IF EXISTS game_teams;
-DROP TABLE IF EXISTS active_games;
-DROP TABLE IF EXISTS recent_matches;
-DROP TABLE IF EXISTS players;
-
+-- DROP TABLE IF EXISTS game_participants;
+-- DROP TABLE IF EXISTS game_teams;
+-- DROP TABLE IF EXISTS active_games;
+-- DROP TABLE IF EXISTS recent_matches;
+-- DROP TABLE IF EXISTS players;
 
 CREATE TABLE IF NOT EXISTS players (
     id SERIAL PRIMARY KEY,
