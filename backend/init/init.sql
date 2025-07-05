@@ -1,10 +1,17 @@
--- DROP TABLE IF EXISTS players;
--- DROP TABLE IF EXISTS recent_matches;
+-- Drop tables in correct order to respect foreign key constraints
+DROP TABLE IF EXISTS game_participants;
+DROP TABLE IF EXISTS game_teams;
+DROP TABLE IF EXISTS active_games;
+DROP TABLE IF EXISTS recent_matches;
+DROP TABLE IF EXISTS players;
+
 
 CREATE TABLE IF NOT EXISTS players (
     id SERIAL PRIMARY KEY,
     player_name VARCHAR(50) NOT NULL,
     summoner_name VARCHAR(50),
+    profileIconId INT,
+    summoner_level INT,
     puuid VARCHAR(100) UNIQUE,
     tag VARCHAR(100),
     team VARCHAR(50),
@@ -36,43 +43,50 @@ CREATE TABLE IF NOT EXISTS recent_matches (
   assists INT
 );
 
+-- Active games with queue info
 CREATE TABLE IF NOT EXISTS active_games (
     game_id BIGINT PRIMARY KEY,
     game_start_time TIMESTAMP,
     game_mode VARCHAR(50),
-    game_duration INT, -- en secondes
+    game_type VARCHAR(50),
+    game_queue_config_id INT,
+    game_duration INT, -- in seconds
     map_id INT,
     platform_id VARCHAR(20),
-    updated_at TIMESTAMP DEFAULT NOW()
+    banned_champions JSONB,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    player_puuid VARCHAR(100)
 );
 
+-- Game participants with comprehensive data
 CREATE TABLE IF NOT EXISTS game_participants (
-    game_id BIGINT REFERENCES active_games(game_id),
-    puuid VARCHAR(100) REFERENCES players(puuid),
+    game_id BIGINT,
+    puuid VARCHAR(100),
+    riot_id VARCHAR(100),
     team_id INT,
     champion_id INT,
     champion_name VARCHAR(50),
-    summoner_name VARCHAR(100),
+    profile_icon_id INT,
     summoner_spell1 INT,
     summoner_spell2 INT,
-    runes JSONB,
-    kills INT,
-    deaths INT,
-    assists INT,
-    gold_earned INT,
-    creep_score INT,
-    vision_score INT,
+    perks JSONB,
     PRIMARY KEY (game_id, puuid)
 );
 
-CREATE TABLE IF NOT EXISTS game_teams (
-    game_id BIGINT REFERENCES active_games(game_id),
-    team_id INT,
-    towers_destroyed INT,
-    inhibitors_destroyed INT,
-    dragons_killed INT,
-    barons_killed INT,
-    heralds_killed INT,
-    total_gold INT,
-    PRIMARY KEY (game_id, team_id)
+-- Game participants players outside of challenge
+CREATE TABLE IF NOT EXISTS summoner_rank_info (
+    puuid VARCHAR(100) PRIMARY KEY,
+    summoner_id VARCHAR(100),
+    summoner_level INT,
+    last_updated TIMESTAMP,
+    soloq_tier VARCHAR(20),
+    soloq_rank VARCHAR(5),
+    soloq_league_points INT,
+    soloq_wins INT,
+    soloq_losses INT,
+    flexq_tier VARCHAR(20),
+    flexq_rank VARCHAR(5),
+    flexq_league_points INT,
+    flexq_wins INT,
+    flexq_losses INT
 );

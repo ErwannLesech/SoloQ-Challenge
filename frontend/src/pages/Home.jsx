@@ -36,7 +36,7 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(() => {
     // Priorité au choix de l'utilisateur sauvegardé
     const savedMode = localStorage.getItem('darkMode');
-    if (savedMode !== null) {
+    if (savedMode !== null && savedMode !== undefined && savedMode !== 'undefined') {
       return JSON.parse(savedMode);
     }
     // Sinon, utiliser la préférence système

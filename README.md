@@ -1,19 +1,18 @@
 # SoloQ Challenge Website
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+![Last Commit](https://img.shields.io/github/last-commit/ton-utilisateur/ton-repo)
+![Main Language](https://img.shields.io/github/languages/top/ton-utilisateur/ton-repo)
+![Tech Stack](https://img.shields.io/badge/Stack-React%20%7C%20Node.js%20%7C%20Express%20%7C%20MongoDB-blue)
 
 Plateforme pour suivre le SoloQ Challenge League of Legends entre amis.  
 
 ## ✨ Fonctionnalités
 
 - Tableau des joueurs : Suivi détaillé de l’état et des statistiques de chaque participant
-
 - Podium des équipes : Visualisation du classement par équipe
-
 - Historique des parties : Récapitulatif des dernières games jouées par les challengers
-
 - Mode sombre : Interface dark mode activable via un bouton
-
 - Interface réactive : Adaptée à tous types d’écrans (responsive design)
 
 ## ⚙️Stack technique

@@ -10,8 +10,24 @@ export default function PlayerRow({ player, index, getTeamColor, isInGame, lastO
       <td className="p-4 text-center">
         <span className="font-semibold">{index + 1}</span>
       </td>
+      <td className="p-4 text-center">
+        <img
+          src={`https://ddragon.leagueoflegends.com/cdn/14.13.1/img/profileicon/${player.profileiconid}.png`}
+          alt={`${player.player_name}'s profile icon`}
+          className="w-10 h-10 rounded-full"
+          onError={(e) => {
+            e.target.src = 'https://ddragon.leagueoflegends.com/cdn/13.20.1/img/profileicon/0.png'; // Default icon
+            e.target.alt = 'Default profile icon';
+          }}
+        />
+      </td>
       <td className="p-4">{player.player_name}</td>
       <td className="p-4">{player.summoner_name}</td>
+      <td className="p-4 text-center">
+        <span className="text-gray-500 dark:text-gray-400">
+          {player.summoner_level}
+        </span>
+      </td>
       <td className="p-4">
         <span className={`inline-block px-3 py-1 rounded-full font-medium ${getTeamColor(player.team)}`}>
           {player.team.charAt(0).toUpperCase() + player.team.slice(1)}

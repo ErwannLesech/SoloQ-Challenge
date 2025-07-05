@@ -18,523 +18,675 @@ app.use(express.json());
 
 const RIOT_API = 'https://euw1.api.riotgames.com';
 
-
-// Endpoint pour ajouter un joueur
-app.post('/api/player', async (req, res) => {
-  const { playerName, summonerName, userTag, team } = req.body;
-
-  try {
-    // 1. Info joueur
-
-    console.log(`${RIOT_API}/riot/account/v1/accounts/by-riot-id/${summonerName}/${userTag}?api_key=${process.env.RIOT_API_KEY}`);
-
-    const summonerRes = await axios.get(`https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${summonerName}/${userTag}?api_key=${process.env.RIOT_API_KEY}`, {
-      headers: { "X-Riot-Token": process.env.RIOT_API_KEY }
-    });
-
-    const summoner = summonerRes.data;
-
-    console.log('Summoner data:', summoner);
-
-    // 2. Info ranked
-    const rankedRes = await axios.get(`${RIOT_API}/lol/league/v4/entries/by-puuid/${summoner.puuid}?api_key=${process.env.RIOT_API_KEY}`, {
-      headers: { "X-Riot-Token": process.env.RIOT_API_KEY }
-    });
-
-    const soloQ = rankedRes.data.find(e => e.queueType === "RANKED_SOLO_5x5");
-
-    await pool.query(`
-      INSERT INTO players (player_name, summoner_name, puuid, tag, team, tier, rank, lp, total_games, wins, losses, win_rate, opgg, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'https://euw.op.gg/summoners/euw/${encodeURIComponent(summoner.gameName)}-${encodeURIComponent(summoner.tagLine)}', $13)
-      ON CONFLICT (puuid) DO UPDATE SET 
-      player_name = EXCLUDED.player_name,
-      summoner_name = EXCLUDED.summoner_name,
-      tag = EXCLUDED.tag,
-      team = EXCLUDED.team,
-      tier = EXCLUDED.tier,
-      rank = EXCLUDED.rank,
-      lp = EXCLUDED.lp,
-      total_games = EXCLUDED.total_games,
-      wins = EXCLUDED.wins,
-      losses = EXCLUDED.losses,
-      win_rate = EXCLUDED.win_rate,
-      opgg = EXCLUDED.opgg;
-    `, [
-      playerName,
-      summoner.gameName,
-      summoner.puuid,
-      summoner.tagLine,
-      team,
-      soloQ?.tier || 'UNRANKED',
-      soloQ?.rank || '',
-      soloQ?.leaguePoints || 0,
-      soloQ?.wins + soloQ?.losses || 0,
-      soloQ?.wins || 0,
-      soloQ?.losses || 0,
-      soloQ ? ((soloQ.wins / (soloQ.wins + soloQ.losses)) * 100).toFixed(1) : 0,
-      new Date().toISOString()
-    ]);
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Erreur lors de l’ajout du joueur.' });
-  }
-});
-
-
-// Endpoint pour récupérer tous les joueurs
-app.get('/api/players', async (req, res) => {
-  const tierOrder = {
-    "IRON": 1,
-    "BRONZE": 2,
-    "SILVER": 3,
-    "GOLD": 4,
-    "PLATINUM": 5,
-    "EMERALD": 6,
-    "DIAMOND": 7,
-    "MASTER": 8,
-    "GRANDMASTER": 9,
-    "CHALLENGER": 10,
-    "UNRANKED": 0
-  };
-
-  const rankOrder = {
-    "IV": 1,
-    "III": 2,
-    "II": 3,
-    "I": 4,
-    "": 0 // For unranked
-  };
-
-  try {
-    const result = await pool.query('SELECT * FROM players');
-    const players = result.rows.map(p => ({
-      ...p,
-      winrate: ((p.wins / (p.wins + p.losses)) * 100).toFixed(1),
-      tierValue: tierOrder[p.tier.toUpperCase()] || 0,
-      rankValue: rankOrder[p.rank.toUpperCase()] || 0,
-    }));
-
-    players.sort((a, b) => {
-      // Trier du plus haut au plus bas
-      if (b.tierValue !== a.tierValue) {
-        return b.tierValue - a.tierValue;
-      }
-      if (b.rankValue !== a.rankValue) {
-        return b.rankValue - a.rankValue;
-      }
-      return b.lp - a.lp;
-    });
-
-    res.json(players);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Erreur lors de la récupération des joueurs.' });
-  }
-});
-
+// Utility function
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Endpoint pour mettre à jour les joueurs
-app.get('/api/update_players', async (req, res) => {
+// ======================================
+// PLAYER-RELATED ENDPOINTS
+// ======================================
 
-  try {
-    const result = await pool.query('SELECT * FROM players');
-    const players = result.rows;
+/**
+ * Player Controller - Handles all player-related operations
+ */
+const playerController = {
+  // Tier and rank ordering for sorting
+  tierOrder: {
+    "IRON": 1, "BRONZE": 2, "SILVER": 3, "GOLD": 4, 
+    "PLATINUM": 5, "EMERALD": 6, "DIAMOND": 7, 
+    "MASTER": 8, "GRANDMASTER": 9, "CHALLENGER": 10,
+    "UNRANKED": 0
+  },
+  rankOrder: {
+    "IV": 1, "III": 2, "II": 3, "I": 4, "": 0
+  },
 
-    const updatedPlayers = [];
+  /**
+   * Get the sorting value for a tier
+   */
+  getTierValue(tier) {
+    return this.tierOrder[tier?.toUpperCase()] || 0;
+  },
 
-    for (let i = 0; i < players.length; i++) {
-      const p = players[i];
+  /**
+   * Get the sorting value for a rank
+   */
+  getRankValue(rank) {
+    return this.rankOrder[rank?.toUpperCase()] || 0;
+  },
 
-      try {
-        // On attend 100ms avant chaque requête pour limiter à ~10 req/sec
-        if (i > 0) await delay(100);
+  /**
+   * Add a new player to the system
+   */
+  async addPlayer(req, res) {
+    const { playerName, summonerName, userTag, team } = req.body;
 
-        // Récup infos ranked
-        const rankedRes = await axios.get(
-          `${RIOT_API}/lol/league/v4/entries/by-puuid/${p.puuid}`,
-          { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
-        );
-        const soloQ = rankedRes.data.find(e => e.queueType === "RANKED_SOLO_5x5");
+    try {
+      // 1. Get summoner info from Riot API
+      const summonerRes = await axios.get(
+        `https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${summonerName}/${userTag}`,
+        { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+      );
+      const summoner = summonerRes.data;
 
-        // Récup dernières 10 parties
-        const matchesRes = await axios.get(
-          `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${p.puuid}/ids?type=ranked&count=5`,
-          { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
-        );
-        const matchIds = matchesRes.data;
+      // 2. Get ranked info
+      const rankedRes = await axios.get(
+        `${RIOT_API}/lol/league/v4/entries/by-puuid/${summoner.puuid}`,
+        { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+      );
+      const soloQ = rankedRes.data.find(e => e.queueType === "RANKED_SOLO_5x5");
 
-        // Pour limiter encore les appels, tu peux ne récupérer que les IDs, ou récupérer les détails en batch avec delay également
-        // Ici on récupère chaque détail sans delay mais tu peux ajouter un delay dans le map si besoin.
+      const summonerInfo = await axios.get(
+        `https://euw1.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${summoner.puuid}?api_key=${process.env.RIOT_API_KEY}`,
+        { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+      );
 
-        const matchResults = [];
-        for (let j = 0; j < matchIds.length; j++) {
-          // Pour éviter d’enchaîner trop vite les appels match detail, on peut mettre un petit delay aussi
-          if (j > 0) await delay(100);
+      const profileIconId = summonerInfo.data.profileIconId || 0;
+      const summonerLevel = summonerInfo.data.summonerLevel || 0;
 
-          const matchDetailRes = await axios.get(
-            `https://europe.api.riotgames.com/lol/match/v5/matches/${matchIds[j]}`,
+      // 3. Insert or update player in database
+      await pool.query(`
+        INSERT INTO players (
+          player_name, summoner_name, puuid, tag, team, tier, rank, lp, 
+          total_games, wins, losses, win_rate, opgg, updated_at, profileIconId, summoner_level
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 
+          'https://euw.op.gg/summoners/euw/${encodeURIComponent(summoner.gameName)}-${encodeURIComponent(summoner.tagLine)}', 
+          $13, $14, $15)
+        ON CONFLICT (puuid) DO UPDATE SET 
+          player_name = EXCLUDED.player_name,
+          summoner_name = EXCLUDED.summoner_name,
+          tag = EXCLUDED.tag,
+          team = EXCLUDED.team,
+          tier = EXCLUDED.tier,
+          rank = EXCLUDED.rank,
+          lp = EXCLUDED.lp,
+          total_games = EXCLUDED.total_games,
+          wins = EXCLUDED.wins,
+          losses = EXCLUDED.losses,
+          win_rate = EXCLUDED.win_rate,
+          opgg = EXCLUDED.opgg,
+          updated_at = EXCLUDED.updated_at,
+          profileIconId = EXCLUDED.profileIconId,
+          summoner_level = EXCLUDED.summoner_level;
+      `, [
+        playerName,
+        summoner.gameName,
+        summoner.puuid,
+        summoner.tagLine,
+        team,
+        soloQ?.tier || 'UNRANKED',
+        soloQ?.rank || '',
+        soloQ?.leaguePoints || 0,
+        soloQ?.wins + soloQ?.losses || 0,
+        soloQ?.wins || 0,
+        soloQ?.losses || 0,
+        soloQ ? ((soloQ.wins / (soloQ.wins + soloQ.losses)) * 100).toFixed(1) : 0,
+        new Date().toISOString(),
+        profileIconId,
+        summonerLevel
+      ]);
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error adding player:', err.message);
+      res.status(500).json({ error: 'Error adding player to the system.' });
+    }
+  },
+
+  /**
+   * Get all players with proper sorting by rank
+   */
+  async getAllPlayers(req, res) {
+    try {
+      const result = await pool.query('SELECT * FROM players');
+      const players = result.rows.map(p => ({
+        ...p,
+        winrate: ((p.wins / (p.wins + p.losses)) * 100).toFixed(1),
+        tierValue: playerController.tierOrder[p.tier.toUpperCase()] || 0,
+        rankValue: playerController.rankOrder[p.rank.toUpperCase()] || 0,
+      }));
+
+      // Sort by tier, then rank, then LP
+      players.sort((a, b) => {
+        if (b.tierValue !== a.tierValue) return b.tierValue - a.tierValue;
+        if (b.rankValue !== a.rankValue) return b.rankValue - a.rankValue;
+        return b.lp - a.lp;
+      });
+
+      res.json(players);
+    } catch (err) {
+      console.error('Error fetching players:', err.message);
+      res.status(500).json({ error: 'Error retrieving player data.' });
+    }
+  },
+
+  /**
+   * Update all players' information from Riot API
+   */
+  async updateAllPlayers(req, res) {
+    try {
+      const result = await pool.query('SELECT * FROM players');
+      const players = result.rows;
+      const updatedPlayers = [];
+
+      for (let i = 0; i < players.length; i++) {
+        const p = players[i];
+        try {
+          // Rate limiting
+          if (i > 0) await delay(100);
+
+          // Get ranked info
+          const rankedRes = await axios.get(
+            `${RIOT_API}/lol/league/v4/entries/by-puuid/${p.puuid}`,
             { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
           );
-          const match = matchDetailRes.data;
-          const participantIndex = match.metadata.participants.findIndex(puuid => puuid === p.puuid);
-          const participant = match.info.participants[participantIndex];
-          matchResults.push(participant.win);
+          const soloQ = rankedRes.data.find(e => e.queueType === "RANKED_SOLO_5x5");
 
-          const playerRole = participant.teamPosition || participant.lane;
-          const playerTeamId = participant.teamId;
+          // Get recent matches (IDs only)
+          const matchesRes = await axios.get(
+            `https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/${p.puuid}/ids?type=ranked&count=5`,
+            { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+          );
+          const matchIds = matchesRes.data;
 
-          // Cherche un participant dans l'autre équipe qui a le même rôle
-          const opponent = match.info.participants.find(other =>
-            other.teamId !== playerTeamId &&
-            (other.teamPosition === playerRole || other.lane === playerRole)
+          // Process each match with delay
+          const matchResults = [];
+          for (let j = 0; j < matchIds.length; j++) {
+            if (j > 0) await delay(100);
+            
+            const matchDetailRes = await axios.get(
+              `https://europe.api.riotgames.com/lol/match/v5/matches/${matchIds[j]}`,
+              { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+            );
+            const match = matchDetailRes.data;
+            const participantIndex = match.metadata.participants.findIndex(puuid => puuid === p.puuid);
+            const participant = match.info.participants[participantIndex];
+            matchResults.push(participant.win);
+
+            // Store match details
+            await playerController.storeMatchDetails(match, p, participant);
+          }
+
+          const summonerInfo = await axios.get(
+            `https://euw1.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${p.puuid}?api_key=${process.env.RIOT_API_KEY}`,
+            { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
           );
 
-          // Nom du champion adverse (si trouvé)
-          const opponentChampion = opponent ? opponent.championName : null;
+          // Update player's ranked info
+          await playerController.updatePlayerRankedInfo(p.puuid, soloQ, matchResults, summonerInfo.data);
 
-          await pool.query(`
-            INSERT INTO recent_matches (
-              match_id, game_datetime, team, puuid, summoner_name, win, 
-              champion_name, opponent_champion, kills, deaths, assists
-            ) VALUES ($1, to_timestamp($2 / 1000.0), $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            ON CONFLICT (match_id) DO NOTHING;
-          `, [
-            match.metadata.matchId,
-            match.info.gameStartTimestamp,
-            p.team,
-            p.puuid,
-            p.player_name,
-            participant.win,
-            participant.championName,
-            opponentChampion,
-            participant.kills,
-            participant.deaths,
-            participant.assists
-          ]);
+          // Check if player is in game
+          await playerController.checkPlayerInGameStatus(p);
+
+          updatedPlayers.push({
+            ...p,
+            tier: soloQ?.tier || 'UNRANKED',
+            rank: soloQ?.rank || '',
+            lp: soloQ?.leaguePoints || 0,
+            wins: soloQ?.wins || 0,
+            losses: soloQ?.losses || 0,
+            total_games: (soloQ?.wins || 0) + (soloQ?.losses || 0),
+            win_rate: soloQ ? ((soloQ.wins / (soloQ.wins + soloQ.losses)) * 100).toFixed(1) : 0,
+            recentMatches: matchResults
+          });
+
+        } catch (err) {
+          console.error(`Error updating player ${p.summoner_name}:`, err.message);
+          updatedPlayers.push({ ...p, recentMatches: [] });
         }
-
-        // Mettre à jour la DB avec les nouvelles infos
-        await pool.query(`
-          UPDATE players SET 
-            tier = $1,
-            rank = $2,
-            lp = $3,
-            wins = $4,
-            losses = $5,
-            total_games = $6,
-            win_rate = $7,
-            last_games = $8,
-            updated_at = NOW()
-          WHERE puuid = $9
-        `, [
-          soloQ?.tier || 'UNRANKED',
-          soloQ?.rank || '',
-          soloQ?.leaguePoints || 0,
-          soloQ?.wins || 0,
-          soloQ?.losses || 0,
-          (soloQ?.wins || 0) + (soloQ?.losses || 0),
-          soloQ ? ((soloQ.wins / (soloQ.wins + soloQ.losses)) * 100).toFixed(1) : 0,
-          matchResults.join(','),
-          p.puuid
-        ]);
-        
-        const summonerStatusRes = await axios.get(
-          `${RIOT_API}/lol/spectator/v5/active-games/by-summoner/${p.puuid}?api_key=${process.env.RIOT_API_KEY}`,
-          { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
-        ).catch(err => {
-          if (err.response && err.response.status === 404) {
-            return { data: null }; // Le joueur n'est pas en partie
-          }
-          throw err;
-        });
-
-        console.log(summonerStatusRes.data);
-
-        const isInGame = summonerStatusRes.data !== null; // && summonerStatusRes.data.gameType === 'RANKED_SOLO_5x5';
-
-        const last_online = isInGame ? new Date().toISOString() : p.last_online;
-
-        console.log(`Mise à jour joueur ${p.summoner_name} - en jeu: ${isInGame}, dernier en ligne: ${last_online}`);
-
-        await pool.query(`
-          UPDATE players SET 
-            in_game = $1,
-            last_online = $3
-          WHERE puuid = $2
-        `, [isInGame, p.puuid, last_online]);
-
-        updatedPlayers.push({
-          ...p,
-          tier: soloQ?.tier || 'UNRANKED',
-          rank: soloQ?.rank || '',
-          lp: soloQ?.leaguePoints || 0,
-          wins: soloQ?.wins || 0,
-          losses: soloQ?.losses || 0,
-          total_games: (soloQ?.wins || 0) + (soloQ?.losses || 0),
-          win_rate: soloQ ? ((soloQ.wins / (soloQ.wins + soloQ.losses)) * 100).toFixed(1) : 0,
-          recentMatches: matchResults
-        });
-
-      } catch (err) {
-        console.error(`Erreur mise à jour joueur ${p.summoner_name}:`, err.message);
-        updatedPlayers.push({
-          ...p,
-          recentMatches: []
-        });
       }
-    }
 
-    res.json(updatedPlayers);
-
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Erreur lors de la récupération et mise à jour des joueurs.' });
-  }
-});
-
-// Endpoint pour récupérer les matchs récents
-app.get('/api/recent_matches', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT * FROM recent_matches 
-      ORDER BY game_datetime DESC 
-      LIMIT 3
-    `);
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Erreur lors de la récupération des matchs récents.' });
-  }
-});
-
-// Endpoint pour récupérer les 20 derniers matchs récents
-app.get('/api/recent_matches_extended', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT * FROM recent_matches 
-      ORDER BY game_datetime DESC 
-      LIMIT 20
-    `);
-
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Erreur lors de la récupération des matchs récents.' });
-  }
-});
-
-// Endpoint pour récupérer les joueurs en game avec détails
-app.get('/api/live_games', async (req, res) => {
-    try {
-        const result = await pool.query(`
-            SELECT 
-                ag.game_id,
-                ag.game_start_time,
-                ag.game_duration,
-                json_agg(
-                    json_build_object(
-                        'summoner_name', p.summoner_name,
-                        'team', p.team,
-                        'champion_name', gp.champion_name,
-                        'kills', gp.kills,
-                        'deaths', gp.deaths,
-                        'assists', gp.assists,
-                        'gold', gp.gold_earned,
-                        'items', gp.items
-                    )
-                ) as participants,
-                json_build_object(
-                    'team1', (SELECT json_build_object(
-                        'objectives', json_build_object(
-                            'towers', gt1.towers_destroyed,
-                            'inhibitors', gt1.inhibitors_destroyed,
-                            'dragons', gt1.dragons_killed,
-                            'barons', gt1.barons_killed
-                        ),
-                        'gold', gt1.total_gold
-                    ) FROM game_teams gt1 WHERE gt1.game_id = ag.game_id AND gt1.team_id = 100),
-                    'team2', (SELECT json_build_object(
-                        'objectives', json_build_object(
-                            'towers', gt2.towers_destroyed,
-                            'inhibitors', gt2.inhibitors_destroyed,
-                            'dragons', gt2.dragons_killed,
-                            'barons', gt2.barons_killed
-                        ),
-                        'gold', gt2.total_gold
-                    ) FROM game_teams gt2 WHERE gt2.game_id = ag.game_id AND gt2.team_id = 200)
-                ) as teams
-            FROM active_games ag
-            JOIN game_participants gp ON ag.game_id = gp.game_id
-            JOIN players p ON gp.puuid = p.puuid
-            WHERE ag.game_start_time > NOW() - INTERVAL '1 hour'
-            GROUP BY ag.game_id
-            ORDER BY ag.game_start_time DESC
-        `);
-
-        console.log('Live games:', result.rows);
-
-        res.json(result.rows);
+      res.json(updatedPlayers);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Erreur lors de la récupération des parties en cours.' });
+      console.error('Error in mass player update:', err.message);
+      res.status(500).json({ error: 'Error updating player data.' });
     }
-});
-// Endpoint pour récupérer les joueurs en game
-// L'objectif est de récupérer juste le nom du joueur en game
-app.get('/api/players_in_game', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        puuid, 
-        summoner_name, 
-        team, 
-        in_game, 
-        last_online,
-        (last_online > NOW() - INTERVAL '10 minutes') as is_online
-      FROM players
-      ORDER BY in_game DESC, last_online DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Erreur lors de la récupération des joueurs en game.' });
-  }
-});
+  },
 
-// Endpoint pour mettre à jour les parties en cours (à appeler périodiquement)
-app.post('/api/insert_live_games', async (req, res) => {
-try {
-    // Récupère uniquement les joueurs marqués comme "en game"
-    const playersInGame = await pool.query(`
+  /**
+   * Helper: Store match details in database
+   */
+  async storeMatchDetails(match, player, participant) {
+    const playerRole = participant.teamPosition || participant.lane;
+    const playerTeamId = participant.teamId;
+
+    // Find opponent in same role/lane
+    const opponent = match.info.participants.find(other =>
+      other.teamId !== playerTeamId &&
+      (other.teamPosition === playerRole || other.lane === playerRole)
+    );
+
+    await pool.query(`
+      INSERT INTO recent_matches (
+        match_id, game_datetime, team, puuid, summoner_name, win, 
+        champion_name, opponent_champion, kills, deaths, assists
+      ) VALUES ($1, to_timestamp($2 / 1000.0), $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (match_id) DO NOTHING;
+    `, [
+      match.metadata.matchId,
+      match.info.gameStartTimestamp,
+      player.team,
+      player.puuid,
+      player.player_name,
+      participant.win,
+      participant.championName,
+      opponent?.championName || null,
+      participant.kills,
+      participant.deaths,
+      participant.assists
+    ]);
+  },
+
+  /**
+   * Helper: Update player's ranked information
+   */
+  async updatePlayerRankedInfo(puuid, soloQ, matchResults, summonerInfo) {
+    await pool.query(`
+      UPDATE players SET 
+        profileIconId = $10,
+        summoner_level = $11,
+        tier = $1,
+        rank = $2,
+        lp = $3,
+        wins = $4,
+        losses = $5,
+        total_games = $6,
+        win_rate = $7,
+        last_games = $8,
+        updated_at = NOW()
+      WHERE puuid = $9
+    `, [
+      soloQ?.tier || 'UNRANKED',
+      soloQ?.rank || '',
+      soloQ?.leaguePoints || 0,
+      soloQ?.wins || 0,
+      soloQ?.losses || 0,
+      (soloQ?.wins || 0) + (soloQ?.losses || 0),
+      soloQ ? ((soloQ.wins / (soloQ.wins + soloQ.losses)) * 100).toFixed(1) : 0,
+      matchResults.join(','),
+      puuid,
+      summonerInfo.profileIconId || 0,
+      summonerInfo.summonerLevel || 0
+    ]);
+  },
+
+  /**
+   * Helper: Check and update if player is in game
+   */
+  async checkPlayerInGameStatus(player) {
+    try {
+      const summonerStatusRes = await axios.get(
+        `${RIOT_API}/lol/spectator/v5/active-games/by-summoner/${player.puuid}`,
+        { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+      ).catch(err => {
+        if (err.response?.status === 404) return { data: null };
+        throw err;
+      });
+
+      const isInGame = summonerStatusRes.data !== null;
+      const last_online = isInGame ? new Date().toISOString() : player.last_online;
+
+      await pool.query(`
+        UPDATE players SET 
+          in_game = $1,
+          last_online = $3
+        WHERE puuid = $2
+      `, [isInGame, player.puuid, last_online]);
+
+    } catch (err) {
+      console.error(`Error checking in-game status for ${player.summoner_name}:`, err.message);
+    }
+  },
+
+  /**
+   * Get recent matches for players
+   */
+  async getRecentMatches(req, res) {
+    try {
+      const limit = req.query.limit || 3;
+      const result = await pool.query(`
+        SELECT * FROM recent_matches 
+        ORDER BY game_datetime DESC 
+        LIMIT $1
+      `, [limit]);
+      res.json(result.rows);
+    } catch (err) {
+      console.error('Error fetching recent matches:', err.message);
+      res.status(500).json({ error: 'Error retrieving recent matches.' });
+    }
+  },
+
+  /**
+   * Get players currently in game
+   */
+  async getPlayersInGame(req, res) {
+    try {
+      const result = await pool.query(`
+        SELECT 
+          puuid, 
+          summoner_name, 
+          team, 
+          in_game, 
+          last_online,
+          (last_online > NOW() - INTERVAL '10 minutes') as is_online
+        FROM players
+        WHERE in_game = true
+        ORDER BY last_online DESC
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error('Error fetching players in game:', err.message);
+      res.status(500).json({ error: 'Error retrieving in-game players.' });
+    }
+  }
+};
+
+// ======================================
+// ACTIVE GAME ENDPOINTS
+// ======================================
+
+/**
+ * Game Controller - Handles all active game operations
+ */
+const gameController = {
+  /**
+   * Get detailed info about live games
+   */
+  async getLiveGames(req, res) {
+    try {
+      // Get all active games with participants and aggregated team stats
+      const result = await pool.query(`
+        SELECT 
+          ag.game_id,
+          ag.game_mode,
+          ag.game_start_time,
+          ag.game_queue_config_id,
+          ag.player_puuid AS player_ref,
+          EXTRACT(EPOCH FROM (NOW() - ag.game_start_time)) as game_duration,
+          (
+            SELECT json_agg(
+              json_build_object(
+                'puuid', gp.puuid,
+                'summoner_name', COALESCE(p.summoner_name, gp.riot_id),
+                'riot_id', gp.riot_id,
+                'team_id', gp.team_id,
+                'champion_id', gp.champion_id,
+                'champion_name', gp.champion_name,
+                'profile_icon_id', gp.profile_icon_id,
+                'summoner_spell1', gp.summoner_spell1,
+                'summoner_spell2', gp.summoner_spell2,
+                'perks', gp.perks
+              )
+            )
+            FROM game_participants gp
+            LEFT JOIN players p ON gp.puuid = p.puuid
+            WHERE gp.game_id = ag.game_id
+          ) as participants
+        FROM active_games ag
+        WHERE ag.game_start_time > NOW() - INTERVAL '1 hours'
+        AND ag.game_mode IN ('CLASSIC', 'ARAM', 'URF', 'RANKED_SOLO_5x5', 'RANKED_FLEX_SR')
+        ORDER BY ag.game_start_time DESC
+      `);
+
+      res.json(result.rows);
+    } catch (err) {
+      console.error('Error fetching live games:', err.message);
+      res.status(500).json({ error: 'Error retrieving live game data.' });
+    }
+  },
+
+  /**
+   * Update active games in the database
+   */
+  async updateLiveGames(req, res) {
+
+    console.log('Updating live games...');
+
+    try {
+      // Get players marked as in-game
+      /*const playersInGame = await pool.query(`
         SELECT p.* FROM players p 
         WHERE p.in_game = true
-    `);
+      `);*/
 
-    const updatedGames = [];
+      const playersInGame = await pool.query(`
+        SELECT p.* FROM players p
+      `);
 
-    for (const player of playersInGame.rows) {
+      const updatedGames = [];
+
+      for (const player of playersInGame.rows) {
         try {
-            // Délai pour respecter les limites de l'API
-            await delay(100); // ~6 req/sec
+          await delay(100); // Rate limiting
 
-            // Récupère les infos de la partie en cours
-            const liveGameRes = await axios.get(
-                `${RIOT_API}/lol/spectator/v5/active-games/by-summoner/${player.puuid}?api_key=${process.env.RIOT_API_KEY}`,
-                { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
-            );
+          // Get active game info
+          const liveGameRes = await axios.get(
+            `${RIOT_API}/lol/spectator/v5/active-games/by-summoner/${player.puuid}`,
+            { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+          );
+          const liveGame = liveGameRes.data;
 
-            const liveGame = liveGameRes.data;
+          // Check if game already exists in DB
+          const existingGame = await pool.query(
+            'SELECT 1 FROM active_games WHERE game_id = $1',
+            [liveGame.gameId]
+          );
 
-            console.log("game en cours", liveGame);
-            const gameId = liveGame.gameId;
-
-            // Vérifie si le jeu est déjà en base
-            const existingGame = await pool.query(
-                'SELECT 1 FROM active_games WHERE game_id = $1',
-                [gameId]
-            );
-
-
-            console.log(existingGame.rows);
-
-            if (existingGame.rows.length === 0) {
-                // Insère le jeu
-
-                await pool.query(`
-                    INSERT INTO active_games (
-                        game_id, game_start_time, game_mode, 
-                        game_duration, map_id, platform_id
-                    ) VALUES ($1, to_timestamp(CAST($2 AS BIGINT)/1000.0), $3, $4, $5, $6)
-                `, [
-                    gameId,
-                    liveGame.gameStartTime,
-                    liveGame.gameMode,
-                    liveGame.gameLength,
-                    liveGame.mapId,
-                    liveGame.platformId
-                ]);
-
-                // Insère les participants
-                for (const participant of liveGame.participants) {
-                    await pool.query(`
-                        INSERT INTO game_participants (
-                            game_id, puuid, team_id, champion_id, champion_name,
-                            summoner_name, summoner_spell1, summoner_spell2
-                        ) VALUES (
-                            $1, $2, $3, $4, $5,
-                            $6, $7, $8
-                        )
-                    `, [
-                        gameId,
-                        participant.puuid,
-                        participant.teamId,
-                        participant.championId,
-                        participant.championName,
-                        participant.summonerName,
-                        participant.spell1Id,
-                        participant.spell2Id
-                    ]);
-
-                    console.log(`INSERT INTO game_participants: (
-                      game_id: ${gameId},
-                      puuid: ${participant.puuid},
-                      team_id: ${participant.teamId},
-                      champion_id: ${participant.championId},
-                      champion_name: ${participant.championName},
-                      summoner_name: ${participant.summonerName},
-                      summoner_spell1: ${participant.spell1Id},
-                      summoner_spell2: ${participant.spell2Id}
-                    )`);
-                }
-
-                // Insère les stats des équipes
-                for (const team of liveGame.teams) {
-                    await pool.query(`
-                        INSERT INTO game_teams (
-                            game_id, team_id, towers_destroyed,
-                            inhibitors_destroyed, dragons_killed,
-                            barons_killed, heralds_killed, total_gold
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    `, [
-                        gameId,
-                        team.teamId,
-                        team.towerKills,
-                        team.inhibitorKills,
-                        team.dragonKills,
-                        team.baronKills,
-                        team.riftHeraldKills,
-                        team.totalGold
-                    ]);
-                }
-
-                updatedGames.push(gameId);
-            }
+          /*if (existingGame.rows.length === 0) {
+            // Insert new game
+            await gameController.insertNewGame(liveGame, player.puuid);
+            updatedGames.push(liveGame.gameId);
+          }*/
+          await gameController.insertNewGame(liveGame, player.puuid);
+          updatedGames.push(liveGame.gameId);
+            
+          await pool.query(
+            `DELETE FROM active_games
+            WHERE player_puuid = $1
+              AND game_id <> $2
+              AND game_duration > $3`,
+            [
+              player.puuid,
+              liveGame.gameId,
+              liveGame.gameLength
+            ]
+          );
         } catch (err) {
-            if (err.response && err.response.status === 404) {
-                // Le joueur n'est plus en game
-                await pool.query(`
-                    UPDATE players SET in_game = false WHERE puuid = $1
-                `, [player.puuid]);
-            } else {
-                console.error(`Erreur lors de la mise à jour de la partie pour ${player.summoner_name}:`, err.message);
-            }
+          if (err.response?.status === 404) {
+            // Player is no longer in game
+            await pool.query(
+              'UPDATE players SET in_game = false WHERE puuid = $1',
+              [player.puuid]
+            );
+
+             // Clean up any related game data
+            await pool.query(
+              'DELETE FROM active_games WHERE player_puuid = $1',
+              [player.puuid]
+            );
+
+            await pool.query(
+              'DELETE FROM game_participants WHERE game_id IN (SELECT game_id FROM active_games WHERE player_puuid = $1)',
+              [player.puuid]
+            );
+            
+          } else {
+            console.error(`Error updating game for ${player.summoner_name}:`, err.message);
+          }
         }
-    }
-
+      }
       res.json({ updated_games: updatedGames.length });
-  } catch (err) {
-      console.error(err.message);
-      res.status(500).json({ error: 'Erreur lors de la mise à jour des parties en cours.' });
-  }
-});
+    } catch (err) {
+      console.error('Error in live game update:', err.message);
+      res.status(500).json({ error: 'Error updating live games.' });
+    }
+  },
 
+  /**
+   * Helper: Insert a new game with all related data
+   */
+  async insertNewGame(gameData, puuid_player_ref) {
+    try {
+        // Insert game metadata
+        await pool.query(`
+            INSERT INTO active_games (
+                game_id, game_start_time, game_mode, 
+                game_type, game_queue_config_id, game_duration, 
+                map_id, platform_id, banned_champions, updated_at, player_puuid
+            ) VALUES ($1, to_timestamp($2/1000.0), $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
+            ON CONFLICT (game_id) DO UPDATE SET
+                game_duration = EXCLUDED.game_duration
+        `, [
+            gameData.gameId,
+            gameData.gameStartTime,
+            gameData.gameMode,
+            gameData.gameType,
+            gameData.gameQueueConfigId,
+            gameData.gameLength,
+            gameData.mapId,
+            gameData.platformId,
+            JSON.stringify(gameData.bannedChampions), // Store banned champions as JSON
+            puuid_player_ref // Use the first participant's puuid as player_puuid
+        ]);
+
+        // Insert participants with their perks
+        for (const participant of gameData.participants) {
+            await pool.query(`
+                INSERT INTO game_participants (
+                    game_id, puuid, team_id, champion_id, 
+                    riot_id, summoner_spell1, summoner_spell2,
+                    profile_icon_id, perks
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (game_id, puuid) DO UPDATE SET
+                    team_id = EXCLUDED.team_id,
+                    champion_id = EXCLUDED.champion_id,
+                    summoner_spell1 = EXCLUDED.summoner_spell1,
+                    summoner_spell2 = EXCLUDED.summoner_spell2,
+                    perks = EXCLUDED.perks
+            `, [
+                gameData.gameId,
+                participant.puuid,
+                participant.teamId,
+                participant.championId,
+                participant.riotId, // Using riotId which includes both name and tag
+                participant.spell1Id,
+                participant.spell2Id,
+                participant.profileIconId,
+                JSON.stringify(participant.perks) // Store perks as JSON
+            ]);
+
+            // Update summoner rank info (if not already exists)
+            try {
+              delay(300); // Rate limiting
+              // First try to get summoner's ranked info from Riot API
+              const rankedRes = await axios.get(
+                `${RIOT_API}/lol/league/v4/entries/by-puuid/${participant.puuid}?api_key=${process.env.RIOT_API_KEY}`,
+                { headers: { "X-Riot-Token": process.env.RIOT_API_KEY } }
+              );
+
+              console.log(rankedRes.data);
+              
+              const soloQ = rankedRes.data.find(e => e.queueType === "RANKED_SOLO_5x5");
+              const flexQ = rankedRes.data.find(e => e.queueType === "RANKED_FLEX_SR");
+
+              await pool.query(`
+                INSERT INTO summoner_rank_info (
+                  puuid, summoner_id, summoner_level, last_updated,
+                  soloq_tier, soloq_rank, soloq_league_points, soloq_wins, soloq_losses,
+                  flexq_tier, flexq_rank, flexq_league_points, flexq_wins, flexq_losses
+                ) VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ON CONFLICT (puuid) DO UPDATE SET
+                  summoner_id = EXCLUDED.summoner_id,
+                  summoner_level = EXCLUDED.summoner_level,
+                  last_updated = NOW(),
+                  soloq_tier = EXCLUDED.soloq_tier,
+                  soloq_rank = EXCLUDED.soloq_rank,
+                  soloq_league_points = EXCLUDED.soloq_league_points,
+                  soloq_wins = EXCLUDED.soloq_wins,
+                  soloq_losses = EXCLUDED.soloq_losses,
+                  flexq_tier = EXCLUDED.flexq_tier,
+                  flexq_rank = EXCLUDED.flexq_rank,
+                  flexq_league_points = EXCLUDED.flexq_league_points,
+                  flexq_wins = EXCLUDED.flexq_wins,
+                  flexq_losses = EXCLUDED.flexq_losses
+              `, [
+                participant.puuid,
+                participant.summonerId,
+                participant.summonerLevel || 0,
+                soloQ?.tier || 'UNRANKED',
+                soloQ?.rank || '',
+                soloQ?.leaguePoints || 0,
+                soloQ?.wins || 0,
+                soloQ?.losses || 0,
+                flexQ?.tier || 'UNRANKED',
+                flexQ?.rank || '',
+                flexQ?.leaguePoints || 0,
+                flexQ?.wins || 0,
+                flexQ?.losses || 0
+              ]);
+            } catch (rankErr) {
+              console.error(`Error updating rank info for ${participant.puuid}:`, rankErr.message);
+              // Insert basic info if rank fetch fails
+              await pool.query(`
+                INSERT INTO summoner_rank_info (
+                  puuid, summoner_id, summoner_level, last_updated
+                ) VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (puuid) DO UPDATE SET
+                  summoner_id = EXCLUDED.summoner_id,
+                  summoner_level = EXCLUDED.summoner_level,
+                  last_updated = NOW()
+              `, [
+                participant.puuid,
+                participant.summonerId,
+                participant.summonerLevel || 0
+              ]);
+            }
+          }
+        
+        console.log(`Successfully inserted game ${gameData.gameId}`);
+    } catch (error) {
+        console.error(`Error inserting game ${gameData.gameId}:`, error);
+        throw error;
+    }
+  },
+
+  async getSummonerRankInfo(req, res) {
+    try {
+      const { puuids } = req.query;
+      const puuidList = puuids.split(',');
+      
+      const result = await pool.query(`
+        SELECT * FROM summoner_rank_info
+        WHERE puuid = ANY($1)
+      `, [puuidList]);
+
+      res.json(result.rows);
+    } catch (err) {
+      console.error('Error fetching summoner rank info:', err.message);
+      res.status(500).json({ error: 'Error retrieving summoner rank data.' });
+    }
+  }
+};
+
+// ======================================
+// ROUTE SETUP
+// ======================================
+
+// Player routes
+app.post('/api/player', playerController.addPlayer);
+app.get('/api/players', playerController.getAllPlayers);
+app.get('/api/update_players', playerController.updateAllPlayers);
+app.get('/api/recent_matches', (req, res) => playerController.getRecentMatches(req, res, 3));
+app.get('/api/recent_matches_extended', (req, res) => playerController.getRecentMatches(req, res, 20));
+app.get('/api/players_in_game', playerController.getPlayersInGame);
+
+// Active game routes
+app.get('/api/live_games', gameController.getLiveGames);
+app.post('/api/insert_live_games', gameController.updateLiveGames);
+app.get('/api/summoner_rank_info', gameController.getSummonerRankInfo);
+
+// Start server
 const PORT = 4000;
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);

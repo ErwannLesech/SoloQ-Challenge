@@ -125,8 +125,10 @@ export default function PlayerTable({
         <thead className="bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-200">
           <tr>
             <th className="p-4 text-left font-semibold">#</th>
+            <th className="p-4 text-left font-semibold">Player Icon</th>
             <th className="p-4 text-left font-semibold">Player Name</th>
             <th className="p-4 text-left font-semibold">Summoner Name</th>
+            <th className="p-4 text-left font-semibold">Level</th>
             <th className="p-4 text-left font-semibold">Team</th>
             <th className="p-4 text-center font-semibold">Status</th>
             <th 

@@ -1,6 +1,7 @@
 import RankIcon from '../RankIcon/RankIcon';
 import SiteIcon from '/public/icons/5stackIcon.png';
 import DarkModeToggle from '../DarkModeToggle/DarkModeToggle';
+import { Link } from 'react-router-dom';
 
 export default function Header({ darkMode, setDarkMode }) {
   return (
@@ -8,12 +9,14 @@ export default function Header({ darkMode, setDarkMode }) {
       <div className="flex justify-between items-start absolute w-full top-0 left-0 px-4 py-4 z-20">
         {/* Icône de site */}
         <div className="w-12 h-12 flex items-center justify-center">
+          <Link to="/">
             <img 
-            src={SiteIcon}
-            className="w-10 h-10 md:w-12 md:h-12 rounded-full border-2 
-                    border-purple-500 hover:scale-110 transition-all"
-            alt="Logo"
+              src={SiteIcon}
+              className="w-10 h-10 md:w-12 md:h-12 rounded-full border-2 
+                      border-purple-500 hover:scale-110 transition-all"
+              alt="Logo"
             />
+          </Link>
         </div>
         
         {/* Bouton dark mode */}
